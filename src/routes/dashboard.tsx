@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Area, AreaChart } from "recharts";
 import { useWizard } from "@/lib/wizard-context";
+import { io } from "socket.io-client";
 
 export const Route = createFileRoute("/dashboard")({
   component: DashboardPage,
@@ -14,7 +15,11 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 // ── Backend URL ──────────────────────────────────────────────────────────────
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL =
+  import.meta.env.VITE_BACKEND_URL ||
+  "http://localhost:5000";
+
+const socket = io(BACKEND_URL);
 
 async function apiPost(path: string, body: object) {
   const res = await fetch(`${BACKEND_URL}${path}`, {
@@ -85,23 +90,65 @@ function DashboardPage() {
   }
 
   // Live updates from ESP32 hardware only
-  useEffect(() => {
-    if (status !== "running") return;
-    const interval = setInterval(async ()=>{
-      try {
-        const res = await fetch(`${BACKEND_URL}/live-data`);
-        const sensor = await res.json();
-        if(sensor.matrix) setMatrix(sensor.matrix);
-        if(sensor.force){
-          setSeries((prev)=>[...prev.slice(-29),{t:prev.length?prev[prev.length-1].t+1:0,force:sensor.force}]);
-        }
-      } catch(e) {
-        console.log("Waiting for ESP32 hardware data...");
+useEffect(() => {
+
+  if (status !== "running") return;
+
+  socket.on("sensorData", (sensor) => {
+
+    console.log("Sensor Received:", sensor);
+
+    if (sensor.matrix && sensor.matrix.length === 64) {
+
+      const matrix8x8: number[][] = [];
+
+      for (let i = 0; i < 8; i++) {
+
+        matrix8x8.push(
+          sensor.matrix.slice(i * 8, i * 8 + 8)
+        );
+
       }
-      setDuration((d)=>d+1);
-    },1000);
-    return ()=>clearInterval(interval);
-  }, [status]);
+
+      setMatrix(matrix8x8);
+    }
+
+    setSeries(prev => [
+
+      ...prev.slice(-29),
+
+      {
+        t:
+          prev.length > 0
+            ? prev[prev.length - 1].t + 1
+            : 0,
+
+        force: sensor.max_force || 0
+      }
+
+    ]);
+
+  });
+
+  return () => {
+    socket.off("sensorData");
+  };
+
+}, [status]);
+
+useEffect(() => {
+
+  if (status !== "running") return;
+
+  const timer = setInterval(() => {
+
+    setDuration(prev => prev + 1);
+
+  }, 1000);
+
+  return () => clearInterval(timer);
+
+}, [status]);
 
   const flat = matrix.flat();
   const avg = +(flat.reduce((a, b) => a + b, 0) / flat.length).toFixed(1);
