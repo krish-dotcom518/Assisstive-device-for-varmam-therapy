@@ -276,24 +276,24 @@ app.post("/esp-data", async (req, res) => {
 // BLUETOOTH API
 // ======================================================
 
-app.post("/bluetooth-data", async (req, res) => {
+app.post("/ble-data", async (req, res) => {
 
   try {
 
-    console.log("Bluetooth DATA");
-
-    await processSensorData(req.body, "Bluetooth");
+    await processSensorData(
+      req.body,
+      "Bluetooth"
+    );
 
     res.send({
-      success: true,
-      message: "Bluetooth Data Received"
+      success: true
     });
 
   } catch (err) {
 
     console.log(err);
 
-    res.status(500).send("Bluetooth Error");
+    res.status(500).send("BLE Error");
   }
 });
 
