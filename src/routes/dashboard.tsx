@@ -69,9 +69,9 @@ function DashboardPage() {
       setStatus("running");
       setDuration(0);
       tickRef.current = 0;
-      setApiMsg({ text: "Session started & recorded", ok: true });
+      setApiMsg({ text: "✅ Session started & recorded", ok: true });
     } catch (e) {
-      setApiMsg({ text: "Could not reach backend — is server running?", ok: false });
+      setApiMsg({ text: "❌ Could not reach backend — is server running?", ok: false });
     }
     setTimeout(() => setApiMsg(null), 4000);
   }
@@ -81,9 +81,9 @@ function DashboardPage() {
       await apiPost("/end-session", {});
       setStatus("ended");
       reset();
-      setApiMsg({ text: "Session updated in MongoDB Atlas", ok: true });
+      setApiMsg({ text: "✅ Session updated in MongoDB Atlas", ok: true });
     } catch (e) {
-      setApiMsg({ text: "End-session failed — check backend", ok: false });
+      setApiMsg({ text: "❌ End-session failed — check backend", ok: false });
       setStatus("ended"); // still stop UI
     }
     setTimeout(() => setApiMsg(null), 5000);

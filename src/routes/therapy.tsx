@@ -42,86 +42,15 @@ function TherapyPage() {
   }
 }, [t.point]);
 
-const connectBLE = async () => {
-  const bluetooth = (navigator as any).bluetooth;
-
-  if (!bluetooth) {
-    throw new Error("Web Bluetooth not supported in this browser");
-  }
-
-  const device = await bluetooth.requestDevice({
-    filters: [{ namePrefix: "VARMAM" }],
-    optionalServices: ["12345678-1234-1234-1234-123456789abc"],
-  });
-
-  const server = await device.gatt?.connect();
-  const service = await server?.getPrimaryService(
-    "12345678-1234-1234-1234-123456789abc"
-  );
-
-  const characteristic = await service?.getCharacteristic(
-    "abcdefab-1234-5678-1234-abcdefabcdef"
-  );
-
-  await characteristic?.startNotifications();
-
-  characteristic?.addEventListener(
-    "characteristicvaluechanged",
-    async (event: any) => {
-      const value = new TextDecoder().decode(event.target.value);
-      const sensor = JSON.parse(value);
-
-      console.log("BLE Sensor:", sensor);
-
-      await fetch("http://localhost:5000/ble-data", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sensor),
-      });
-    }
-  );
-
-  setConnected(true);
-};
-  const pickMode = async (
-  mode: typeof MODES[number]["id"]
-) => {
-
-  setConnecting(mode);
-
-  setConnected(false);
-
-  update("therapy", {
-    connectivity: mode
-  });
-
-  try {
-
-    if (mode === "Bluetooth") {
-
-      await connectBLE();
-    } else {
-
-      // WiFi / USB
-
-      setTimeout(() => {
-        setConnected(true);
-      }, 1000);
-
-    }
-
-  } catch (err) {
-
-    console.error(err);
-
+  const pickMode = (mode: typeof MODES[number]["id"]) => {
+    setConnecting(mode);
     setConnected(false);
-
-  } finally {
-
-    setConnecting(null);
-
-  }
-};
+    update("therapy", { connectivity: mode });
+    setTimeout(() => {
+      setConnecting(null);
+      setConnected(true);
+    }, 1400);
+  };
 
   return (
     <StepShell>
