@@ -30,3 +30,18 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+*.npy
+*.keras
+*.h5
+*.pkl
+*.joblib
+*.csv
+__pycache__/
+.ipynb_checkpoints/
+
+# Generated datasets
+preprocessed_*.csv
+X_*.npy
+y_*.npy
+

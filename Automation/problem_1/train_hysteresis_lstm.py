@@ -1,107 +1,58 @@
-import json
 import numpy as np
-import pandas as pd
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score
+)
 
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.layers import (
+    LSTM,
+    Dense,
+    Dropout
+)
+from tensorflow.keras.callbacks import (
+    EarlyStopping
+)
 
-# =====================================================
-# LOAD JSON
-# =====================================================
+X = np.load(
+    "X_hysteresis.npy"
+)
 
-with open("varmamDB.sessions.json", "r", encoding="utf-8") as f:
-    sessions = json.load(f)
+y = np.load(
+    "y_hysteresis.npy"
+)
 
-frames = []
-targets = []
+print("X:", X.shape)
+print("y:", y.shape)
 
-# =====================================================
-# EXTRACT MATRIX + AVG_FORCE
-# =====================================================
-
-for session in sessions:
-
-    readings = session.get("readings", [])
-
-    readings.sort(
-        key=lambda r: r["time"]["$date"]
-    )
-
-    for r in readings:
-
-        matrix = r.get("matrix", [])
-
-        if len(matrix) != 64:
-            continue
-
-        frames.append(matrix)
-
-        targets.append(
-            r.get("avg_force", 0)
-        )
-
-frames = np.array(frames, dtype=np.float32)
-targets = np.array(targets, dtype=np.float32)
-
-print("Frames Shape:", frames.shape)
-
-# =====================================================
-# CREATE 6-FRAME SEQUENCES
-# =====================================================
-
-X = []
-y = []
-
-for i in range(5, len(frames)):
-
-    sequence = frames[i-5:i+1]
-
-    X.append(sequence)
-
-    y.append(targets[i])
-
-X = np.array(X)
-y = np.array(y)
-
-print("X Shape:", X.shape)
-print("Y Shape:", y.shape)
-
-# =====================================================
-# TRAIN / TEST SPLIT
-# =====================================================
-
-split = int(len(X) * 0.8)
-
-X_train = X[:split]
-X_test = X[split:]
-
-y_train = y[:split]
-y_test = y[split:]
-
-# =====================================================
-# LSTM MODEL
-# =====================================================
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    shuffle=False
+)
 
 model = Sequential([
 
     LSTM(
         128,
-        input_shape=(6, 64),
-        return_sequences=True
+        return_sequences=True,
+        input_shape=(
+            X.shape[1],
+            X.shape[2]
+        )
     ),
 
     Dropout(0.2),
 
     LSTM(
-        64,
-        return_sequences=False
+        64
     ),
 
-    Dense(
-        64,
-        activation="relu"
-    ),
+    Dropout(0.2),
 
     Dense(
         32,
@@ -122,10 +73,6 @@ model.compile(
 
 model.summary()
 
-# =====================================================
-# TRAIN
-# =====================================================
-
 early_stop = EarlyStopping(
     monitor="val_loss",
     patience=10,
@@ -137,27 +84,44 @@ history = model.fit(
     y_train,
     validation_split=0.2,
     epochs=100,
-    batch_size=16,
+    batch_size=32,
     callbacks=[early_stop]
 )
 
-# =====================================================
-# TEST
-# =====================================================
+pred = model.predict(
+    X_test
+).flatten()
 
-loss, mae = model.evaluate(
-    X_test,
-    y_test
+print(
+    "\nMAE:",
+    mean_absolute_error(
+        y_test,
+        pred
+    )
 )
 
-print("\nTest MAE =", mae)
+print(
+    "RMSE:",
+    np.sqrt(
+        mean_squared_error(
+            y_test,
+            pred
+        )
+    )
+)
 
-# =====================================================
-# SAVE MODEL
-# =====================================================
+print(
+    "R2:",
+    r2_score(
+        y_test,
+        pred
+    )
+)
 
 model.save(
-    "varmam_hysteresis_lstm.keras"
+    "hysteresis_compensation_lstm.keras"
 )
 
-print("\nModel saved as varmam_hysteresis_lstm.keras")
+print(
+    "\nModel saved."
+)

@@ -1,48 +1,24 @@
 import pandas as pd
-import numpy as np
+import joblib
 
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
-
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
-from tensorflow.keras.callbacks import EarlyStopping
-
-# =====================================================
-# LOAD DATASET
-# =====================================================
-
-df = pd.read_csv(
-    "varmam_mass_dataset.csv"
+from sklearn.neural_network import MLPRegressor
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score
 )
 
-# =====================================================
-# FEATURES
-# =====================================================
+df = pd.read_csv(
+    "preprocessed_mlp_dataset.csv"
+)
 
-X = df[
-    [f"adc{i}" for i in range(1,65)]
-].values
+X = df.drop(
+    "weight_g",
+    axis=1
+)
 
-# =====================================================
-# TARGET
-# =====================================================
-
-y = df[
-    "estimated_mass_g"
-].values
-
-# =====================================================
-# NORMALIZE
-# =====================================================
-
-scaler = MinMaxScaler()
-
-X = scaler.fit_transform(X)
-
-# =====================================================
-# SPLIT
-# =====================================================
+y = df["weight_g"]
 
 X_train, X_test, y_train, y_test = train_test_split(
     X,
@@ -51,80 +27,63 @@ X_train, X_test, y_train, y_test = train_test_split(
     random_state=42
 )
 
-# =====================================================
-# MODEL
-# =====================================================
-
-model = Sequential([
-
-    Dense(
-        128,
-        activation="relu",
-        input_shape=(64,)
-    ),
-
-    Dense(
-        64,
-        activation="relu"
-    ),
-
-    Dense(
-        32,
-        activation="relu"
-    ),
-
-    Dense(
-        1,
-        activation="linear"
-    )
-])
-
-model.compile(
-    optimizer="adam",
-    loss="mse",
-    metrics=["mae"]
+model = MLPRegressor(
+    hidden_layer_sizes=(256,128,64),
+    activation="relu",
+    solver="adam",
+    learning_rate_init=0.001,
+    max_iter=1000,
+    random_state=42
 )
 
-model.summary()
-
-# =====================================================
-# TRAIN
-# =====================================================
-
-early_stop = EarlyStopping(
-    monitor="val_loss",
-    patience=10,
-    restore_best_weights=True
-)
-
-history = model.fit(
+model.fit(
     X_train,
-    y_train,
-    validation_split=0.2,
-    epochs=100,
-    batch_size=16,
-    callbacks=[early_stop]
+    y_train
 )
 
-# =====================================================
-# EVALUATE
-# =====================================================
-
-loss, mae = model.evaluate(
-    X_test,
-    y_test
+pred = model.predict(
+    X_test
 )
 
-print("\nTest MAE:", mae)
+print("\n========== METRICS ==========")
 
-# =====================================================
-# SAVE
-# =====================================================
-
-model.save(
-    "mass_predictor.keras"
+print(
+    "MAE:",
+    mean_absolute_error(
+        y_test,
+        pred
+    )
 )
 
 print(
-    "\nModel Saved: mass_predictor.keras"
+    "RMSE:",
+    mean_squared_error(
+        y_test,
+        pred
+    )**0.5
+)
+
+print(
+    "R²:",
+    r2_score(
+        y_test,
+        pred
+    )
+)
+
+print("\n========== EXAMPLES ==========")
+
+for i in range(10):
+    print(
+        f"Actual: {y_test.iloc[i]:.2f} g"
+        f" | Predicted: {pred[i]:.2f} g"
+    )
+
+joblib.dump(
+    model,
+    "weight_prediction_mlp.pkl"
+)
+
+print(
+    "\nModel Saved."
 )
