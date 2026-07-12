@@ -360,7 +360,7 @@ function DashboardPage() {
 
   // ── CSV exporter ─────────────────────────────────────────────────────────
   function handleCsvExport() {
-    const sessionToExport = selectedSession || currentSession || (status === "ended" ? {
+    const sessionToExport = selectedSession || (status === "ended" ? {
       patientName: data.patient.name,
       sessionNumber: data.patient.session,
       doctorName: data.doctor.name,
@@ -794,13 +794,24 @@ function DashboardPage() {
           {/* TAB 3: CLINICAL REPORTS */}
           {activeTab === "reports" && (
             <div className="glass-card rounded-3xl p-6 max-w-4xl mx-auto space-y-6">
-              {!(selectedSession || currentSession) ? (
+              {!(selectedSession || status === "ended") ? (
                 <div className="py-12 text-center text-sm text-muted-foreground">
                   No active session or loaded recording. Run a live monitoring session or select one from the "Sessions" tab to generate a clinical report.
                 </div>
               ) : (
                 (() => {
-                  const target = selectedSession || currentSession;
+                  const target =
+  selectedSession ??
+  {
+    patientName: data.patient.name,
+    sessionNumber: data.patient.session,
+    doctorName: data.doctor.name,
+    varmamPoint: data.therapy.point,
+    readings: series.map((s) => ({
+      predicted_force: s.mlForce,
+      max_force: s.rawForce
+    }))
+  };
                   const readings = target.readings || [];
                   const count = readings.length;
                   const forces = readings.map((r: any) => r.predicted_force || r.max_force || 0);

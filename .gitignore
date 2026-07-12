@@ -45,3 +45,7 @@ preprocessed_*.csv
 X_*.npy
 y_*.npy
 
+venv/
+.venv/
+__pycache__/
+*.pyc
