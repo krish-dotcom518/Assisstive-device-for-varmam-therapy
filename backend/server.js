@@ -70,6 +70,11 @@ let simulationMode = false;
 let simulationInterval = null;
 let serialPortInstance = null;
 let activePortPath = null;
+let simulatedBattery = 100;
+let batteryDirection = -1;
+const firmwareVersion = "v3.2.1";
+const sensorCount = 64;
+
 
 // ======================================================
 // HELPER FOR ML SERVICE PREDICTION
@@ -147,7 +152,7 @@ async function processSensorData(data, mode) {
       validation,
       mode,
       predicted_weight,
-      predicted_force
+      predicted_force,
     };
 
     // Emit live packet to Socket.io frontend clients
@@ -211,7 +216,8 @@ function startSimulator() {
     if (baseOsc > 0.1) status = "loading";
     else if (baseOsc < -0.1) status = "unloading";
 
-    await processSensorData({ matrix, avg_force, max_force, status }, "Simulated");
+    await processSensorData({ matrix, avg_force, max_force, status, battery: Math.round(simulatedBattery),
+        firmware: "v3.2.1" }, "Simulated");
   }, 350); // Emit sensor frame every 350ms (~3Hz)
 }
 
@@ -447,6 +453,27 @@ app.post("/bluetooth-data", async (req, res) => {
     console.log(err);
     res.status(500).send("Bluetooth Ingestion Error");
   }
+});
+
+app.get("/device-status", (req, res) => {
+
+  if (simulationMode) {
+
+    simulatedBattery += batteryDirection * 0.2;
+
+    if (simulatedBattery <= 20)
+      batteryDirection = 1;
+
+    if (simulatedBattery >= 100)
+      batteryDirection = -1;
+  }
+
+  res.json({
+    battery: Math.round(simulatedBattery),
+    firmware: firmwareVersion,
+    sensors: sensorCount
+  });
+
 });
 
 // ======================================================

@@ -26,6 +26,9 @@ function TherapyPage() {
   const t = data.therapy;
   const [connecting, setConnecting] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [battery, setBattery] = useState(100);
+const [firmware, setFirmware] = useState("v3.2.1");
+const [sensorCount, setSensorCount] = useState(64);
   const selectedPoint = VARMAM_POINTS.find((p)=>p.pointName===t.point);
   const filteredPoints = VARMAM_POINTS;
   useEffect(() => {
@@ -41,6 +44,27 @@ function TherapyPage() {
     });
   }
 }, [t.point]);
+
+useEffect(() => {
+  const fetchDeviceStatus = async () => {
+    try {
+      const res = await fetch("http://localhost:5000/device-status");
+      const data = await res.json();
+
+      setBattery(data.battery);
+      setFirmware(data.firmware);
+      setSensorCount(data.sensors);
+    } catch (err) {
+      console.error("Unable to fetch device status");
+    }
+  };
+
+  fetchDeviceStatus();
+
+  const interval = setInterval(fetchDeviceStatus, 1000);
+
+  return () => clearInterval(interval);
+}, []);
 
   const pickMode = (mode: typeof MODES[number]["id"]) => {
     setConnecting(mode);
@@ -162,10 +186,10 @@ function TherapyPage() {
             </div>
             <div className="mt-2 grid grid-cols-3 gap-2 text-center">
               {[
-                { k: "Battery", v: "92%" },
-                { k: "Firmware", v: "v3.2.1" },
-                { k: "Sensors", v: "64" },
-              ].map((s) => (
+  { k: "Battery", v: `${battery}%` },
+  { k: "Firmware", v: firmware },
+  { k: "Sensors", v: `${sensorCount}` },
+].map((s) => (
                 <div key={s.k} className="rounded-xl bg-secondary/60 px-2 py-2">
                   <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{s.k}</div>
                   <div className="font-display text-sm font-semibold text-foreground">{s.v}</div>
