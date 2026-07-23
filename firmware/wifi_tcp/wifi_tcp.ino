@@ -17,8 +17,8 @@
 #define SENSORS_COUNT 64
 
 // Wi-Fi credentials configuration
-const char* ssid     = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid     = "krishika";
+const char* password = "krishi123";
 
 // TCP Server on port 8080
 WiFiServer server(8080);
