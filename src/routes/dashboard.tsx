@@ -1,9 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity, AlertTriangle, BarChart3, Bell, CheckCircle2, ChevronLeft, FileText, Gauge,
-  LayoutDashboard, Pause, Play, PlugZap, Settings, Square, TrendingUp, Cpu, Wifi, Bluetooth, Cable, Clock,
+  LayoutDashboard, Pause, Play, PlugZap, Square, TrendingUp, Wifi, Bluetooth, Cable, Clock,
   Download, RefreshCw, X, PlayCircle, PauseCircle, Check
 } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Area, AreaChart, Legend as ChartLegend } from "recharts";
@@ -28,8 +28,6 @@ const NAV = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "sessions", label: "Sessions", icon: Clock },
   { id: "reports", label: "Reports", icon: FileText },
-  { id: "device", label: "Device Status", icon: Cpu },
-  { id: "settings", label: "Settings", icon: Settings },
 ];
 
 function DashboardPage() {
@@ -52,21 +50,8 @@ function DashboardPage() {
   const [activeHistoryIndex, setActiveHistoryIndex] = useState(-1);
   const [playHistory, setPlayHistory] = useState(false);
 
-  // Device & COM settings
-  const [comPorts, setComPorts] = useState<string[]>([]);
-  const [selectedComPort, setSelectedComPort] = useState("");
-  const [activeComPort, setActiveComPort] = useState<string | null>(null);
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [mlServiceOnline, setMlServiceOnline] = useState(false);
-
-  // Hardware status & configuration states
+  // Device status
   const [deviceStatus, setDeviceStatus] = useState<any>(null);
-  const [wifiIp, setWifiIp] = useState("");
-  const [wifiPort, setWifiPort] = useState("");
-  const [bleDeviceName, setBleDeviceName] = useState("");
-  const [thresholdLow, setThresholdLow] = useState("");
-  const [thresholdHigh, setThresholdHigh] = useState("");
-  const configLoadedRef = useRef(false);
 
   // Notifications
   const [notifications, setNotifications] = useState<{ id: string; text: string; type: "info" | "warning" | "error"; time: string }[]>([]);
@@ -274,88 +259,6 @@ function DashboardPage() {
     setDuration(activeHistoryIndex * 0.35); // simulate relative elapsed time
   }, [selectedSession, activeHistoryIndex]);
 
-  // ── Hardware COM connections ──────────────────────────────────────────
-  async function fetchComPorts() {
-    try {
-      const res = await fetch(`${BACKEND_URL}/com-ports`);
-      if (res.ok) {
-        const d = await res.json();
-        setComPorts(d.paths || []);
-        setActiveComPort(d.activePortPath);
-        if (d.paths.length > 0 && !selectedComPort) {
-          setSelectedComPort(d.paths[0]);
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  async function handleComConnect() {
-    try {
-      const res = await apiPost("/connect-usb", { path: selectedComPort });
-      if (res.success) {
-        setActiveComPort(selectedComPort);
-        setApiMsg({ text: `🔌 Connected to ${selectedComPort}`, ok: true });
-        addNotification(`USB connection established on ${selectedComPort}`, "info");
-      } else {
-        setApiMsg({ text: `❌ COM Connection failed`, ok: false });
-      }
-    } catch (e) {
-      setApiMsg({ text: `❌ COM Communication error`, ok: false });
-    }
-    setTimeout(() => setApiMsg(null), 3000);
-  }
-
-  async function handleComDisconnect() {
-    try {
-      const res = await apiPost("/connect-usb", { path: "" });
-      if (res.success) {
-        setActiveComPort(null);
-        setApiMsg({ text: `🔌 USB disconnected`, ok: true });
-        addNotification("USB Serial connection closed.", "info");
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    setTimeout(() => setApiMsg(null), 3000);
-  }
-
-  // Simulator setting
-  async function toggleSimulator(enable: boolean) {
-    try {
-      const res = await apiPost("/toggle-simulation", { enable });
-      if (res.success) {
-        setIsSimulating(enable);
-        setApiMsg({ text: enable ? "🔌 Simulator activated" : "🔌 Simulator stopped", ok: true });
-        addNotification(enable ? "ESP32 Simulator started." : "ESP32 Simulator stopped.", "info");
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    setTimeout(() => setApiMsg(null), 3000);
-  }
-
-  async function handleSaveHardwareConfig() {
-    try {
-      const res = await apiPost("/save-hardware-config", {
-        usb: { path: selectedComPort },
-        wifi: { ip: wifiIp, port: Number(wifiPort) },
-        bluetooth: { deviceName: bleDeviceName },
-        thresholds: { low: Number(thresholdLow), high: Number(thresholdHigh) }
-      });
-      if (res.success) {
-        setApiMsg({ text: "✅ Hardware configuration updated and saved", ok: true });
-        addNotification("Hardware parameters updated.", "info");
-      } else {
-        setApiMsg({ text: "❌ Configuration update failed", ok: false });
-      }
-    } catch (e) {
-      setApiMsg({ text: "❌ Configuration error", ok: false });
-    }
-    setTimeout(() => setApiMsg(null), 3000);
-  }
-
   // Fetch device-status dynamically
   useEffect(() => {
     const fetchDeviceStatus = async () => {
@@ -364,13 +267,6 @@ function DashboardPage() {
         if (res.ok) {
           const d = await res.json();
           setDeviceStatus(d);
-          
-          // Keep activeComPort in sync for legacy code
-          if (d.mode === "USB" && d.status === "Connected") {
-            setActiveComPort(d.config?.usb?.path || null);
-          } else {
-            setActiveComPort(null);
-          }
         }
       } catch (err) {
         console.error("Unable to fetch device status:", err);
@@ -382,44 +278,9 @@ function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Sync inputs from config on first load
-  useEffect(() => {
-    if (deviceStatus?.config && !configLoadedRef.current) {
-      const c = deviceStatus.config;
-      if (c.usb?.path) {
-        setSelectedComPort(c.usb.path);
-      }
-      if (c.wifi?.ip) setWifiIp(c.wifi.ip);
-      if (c.wifi?.port) setWifiPort(String(c.wifi.port));
-      if (c.bluetooth?.deviceName) setBleDeviceName(c.bluetooth.deviceName);
-      if (c.thresholds?.low) setThresholdLow(String(c.thresholds.low));
-      if (c.thresholds?.high) setThresholdHigh(String(c.thresholds.high));
-      configLoadedRef.current = true;
-    }
-  }, [deviceStatus]);
-
   // Health checks & listings
   useEffect(() => {
-    fetchComPorts();
     fetchSessions();
-
-    const checkMl = async () => {
-      try {
-        const res = await fetch("http://localhost:5001/");
-        if (res.ok) {
-          const body = await res.json();
-          setMlServiceOnline(body.status === "online");
-        } else {
-          setMlServiceOnline(false);
-        }
-      } catch (e) {
-        setMlServiceOnline(false);
-      }
-    };
-    checkMl();
-    const intv = setInterval(checkMl, 5000);
-
-    return () => clearInterval(intv);
   }, []);
 
   // Fetch when tab changes to lists
@@ -891,7 +752,7 @@ function DashboardPage() {
                   const count = readings.length;
                   const forces = readings.map((r: any) => r.predicted_force || r.max_force || 0);
                   const peak = forces.length > 0 ? Math.max(...forces).toFixed(1) : "0.0";
-                  const reportAvg = forces.length > 0 ? (forces.reduce((a, b) => a + b, 0) / forces.length).toFixed(1) : "0.0";
+                  const reportAvg = forces.length > 0 ? (forces.reduce((a: number, b: number) => a + b, 0) / forces.length).toFixed(1) : "0.0";
                   
                   // Compute validation percentages
                   let correctCount = 0;
@@ -987,319 +848,9 @@ function DashboardPage() {
             </div>
           )}
 
-          {/* TAB 4: DEVICE STATUS */}
-          {activeTab === "device" && (
-            <div className="glass-card rounded-3xl p-6 max-w-2xl mx-auto space-y-6">
-              <div className="border-b pb-4">
-                <h2 className="font-display text-xl font-semibold">ESP32 Hardware Integration</h2>
-                <p className="text-xs text-muted-foreground">Configure connection modes and pair the sensor grid</p>
-              </div>
 
-              {/* Status Header */}
-              <div className="flex items-center justify-between border bg-secondary/30 rounded-2xl p-5">
-                <div className="flex items-center gap-3">
-                  <div className={`grid h-12 w-12 place-items-center rounded-xl bg-card border ${
-                    isHardwareConnected ? 'text-green-500 border-green-500/40 bg-green-500/5' : 
-                    isHardwareConnecting ? 'text-amber-500 border-amber-500/40 bg-amber-500/5' : 
-                    'text-muted-foreground'
-                  }`}>
-                    <Cpu className={`h-6 w-6 ${isHardwareConnecting ? 'animate-spin' : isHardwareConnected ? 'animate-pulse' : ''}`} />
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Device Connection</span>
-                    <h3 className="text-base font-bold">
-                      {isHardwareConnected 
-                        ? `Connected via ${activeHardwareMode} ${activeHardwareMode === "USB" ? `(${deviceStatus?.config?.usb?.path || "Serial"})` : ""}` 
-                        : isHardwareConnecting 
-                        ? `Connecting to ${activeHardwareMode}...` 
-                        : `Offline / Unlinked (${activeHardwareMode})`}
-                    </h3>
-                  </div>
-                </div>
-                
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${
-                  isHardwareConnected ? 'bg-success/15 text-success' : 
-                  isHardwareConnecting ? 'bg-amber-500/15 text-amber-500' : 
-                  'bg-secondary text-muted-foreground'
-                }`}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${
-                    isHardwareConnected ? 'bg-success animate-ping' : 
-                    isHardwareConnecting ? 'bg-amber-500 animate-pulse' : 
-                    'bg-muted-foreground/60'
-                  }`} />
-                  {isHardwareConnected ? "Connected" : isHardwareConnecting ? "Connecting" : "Disconnected"}
-                </span>
-              </div>
 
-              {/* Connectivity details */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-semibold uppercase tracking-wider">Configure Connection Method</h3>
-                
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {/* Mode Settings Card */}
-                  <div className="border rounded-2xl p-5 space-y-4">
-                    {activeHardwareMode === "USB" ? (
-                      <>
-                        <div className="flex items-center gap-2 text-primary">
-                          <Cable className="h-5 w-5" />
-                          <span className="text-sm font-semibold">USB Cable Configuration</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Link the dashboard directly to the ESP32 COM port over USB Serial.</p>
-                        
-                        <div className="space-y-2 border-t pt-3">
-                          <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">Select COM Port</label>
-                          <div className="flex gap-2">
-                            <select
-                              value={selectedComPort}
-                              onChange={(e) => setSelectedComPort(e.target.value)}
-                              className="flex-1 rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
-                            >
-                              {comPorts.length === 0 ? (
-                                <option value="">No COM Ports Found</option>
-                              ) : (
-                                comPorts.map(p => <option key={p} value={p}>{p}</option>)
-                              )}
-                            </select>
-                            <button
-                              onClick={fetchComPorts}
-                              className="grid h-8 w-8 place-items-center rounded-xl border bg-card text-muted-foreground hover:text-foreground cursor-pointer"
-                              title="Refresh Ports"
-                            >
-                              <RefreshCw className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
 
-                          <div className="pt-2 flex gap-2">
-                            <button
-                              onClick={handleComConnect}
-                              disabled={!selectedComPort || isHardwareConnected}
-                              className="flex-1 bg-primary text-primary-foreground rounded-xl py-2 text-xs font-semibold hover:opacity-90 disabled:opacity-50 cursor-pointer"
-                            >
-                              {isHardwareConnecting ? "Linking..." : "Link COM Port"}
-                            </button>
-                            {isHardwareConnected && (
-                              <button
-                                onClick={handleComDisconnect}
-                                className="border border-red-500 text-red-500 bg-red-500/5 rounded-xl px-3 py-2 text-xs font-semibold hover:bg-red-500 hover:text-white cursor-pointer"
-                              >
-                                Unlink
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </>
-                    ) : activeHardwareMode === "WiFi" ? (
-                      <>
-                        <div className="flex items-center gap-2 text-primary">
-                          <Wifi className="h-5 w-5" />
-                          <span className="text-sm font-semibold">Wi-Fi TCP Client Configuration</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Connect to the ESP32 TCP server streaming CSV sensor frames wirelessly.</p>
-                        
-                        <div className="space-y-3 border-t pt-3">
-                          <div className="space-y-1">
-                            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">IP Address</label>
-                            <input
-                              type="text"
-                              value={wifiIp}
-                              onChange={(e) => setWifiIp(e.target.value)}
-                              placeholder="e.g. 192.168.4.1"
-                              className="w-full rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
-                            />
-                          </div>
-                          
-                          <div className="space-y-1">
-                            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">Port</label>
-                            <input
-                              type="text"
-                              value={wifiPort}
-                              onChange={(e) => setWifiPort(e.target.value)}
-                              placeholder="e.g. 8080"
-                              className="w-full rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
-                            />
-                          </div>
-
-                          <div className="pt-2">
-                            <button
-                              onClick={handleSaveHardwareConfig}
-                              className="w-full bg-primary text-primary-foreground rounded-xl py-2 text-xs font-semibold hover:opacity-90 cursor-pointer"
-                            >
-                              Save & Connect Wi-Fi
-                            </button>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-2 text-primary">
-                          <Bluetooth className="h-5 w-5" />
-                          <span className="text-sm font-semibold">Bluetooth BLE Configuration</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Scan and connect to the ESP32 BLE server notifying CSV sensor packets.</p>
-                        
-                        <div className="space-y-3 border-t pt-3">
-                          <div className="space-y-1">
-                            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">BLE Device Name</label>
-                            <input
-                              type="text"
-                              value={bleDeviceName}
-                              onChange={(e) => setBleDeviceName(e.target.value)}
-                              placeholder="e.g. Varmam_Therapy_BLE"
-                              className="w-full rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
-                            />
-                          </div>
-
-                          <div className="pt-2">
-                            <button
-                              onClick={handleSaveHardwareConfig}
-                              className="w-full bg-primary text-primary-foreground rounded-xl py-2 text-xs font-semibold hover:opacity-90 cursor-pointer"
-                            >
-                              Save & Scan BLE
-                            </button>
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Clinical Threshold Config Card */}
-                  <div className="border rounded-2xl p-5 space-y-4">
-                    <div className="flex items-center gap-2 text-primary">
-                      <Settings className="h-5 w-5" />
-                      <span className="text-sm font-semibold">Pressure Threshold Config</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Configure the clinical force thresholds (Newtons) stored in the backend.</p>
-                    
-                    <div className="space-y-3 border-t pt-3">
-                      <div className="space-y-1">
-                        <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">Low Stimulation Threshold (N)</label>
-                        <input
-                          type="number"
-                          value={thresholdLow}
-                          onChange={(e) => setThresholdLow(e.target.value)}
-                          placeholder="35"
-                          className="w-full rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
-                        />
-                      </div>
-                      
-                      <div className="space-y-1">
-                        <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">High Overpressure Threshold (N)</label>
-                        <input
-                          type="number"
-                          value={thresholdHigh}
-                          onChange={(e) => setThresholdHigh(e.target.value)}
-                          placeholder="75"
-                          className="w-full rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
-                        />
-                      </div>
-
-                      <div className="pt-2">
-                        <button
-                          onClick={handleSaveHardwareConfig}
-                          className="w-full bg-primary text-primary-foreground rounded-xl py-2 text-xs font-semibold hover:opacity-90 cursor-pointer"
-                        >
-                          Save Thresholds
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Hardware specifications */}
-              <div className="border rounded-2xl p-5 space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Active Device Specs</h4>
-                <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="bg-secondary/30 p-2.5 rounded-xl border">
-                    <span className="text-[10px] text-muted-foreground block">Firmware</span>
-                    <strong className="text-foreground">{deviceStatus?.firmware || firmwareVersion}</strong>
-                  </div>
-                  <div className="bg-secondary/30 p-2.5 rounded-xl border">
-                    <span className="text-[10px] text-muted-foreground block">Sensors</span>
-                    <strong className="text-foreground">{deviceStatus?.sensors ? `${deviceStatus.sensors} Cells` : "8x8 Matrix"}</strong>
-                  </div>
-                  <div className="bg-secondary/30 p-2.5 rounded-xl border">
-                    <span className="text-[10px] text-muted-foreground block">Battery</span>
-                    <strong className={deviceStatus?.battery && deviceStatus.battery > 20 ? "text-green-500" : "text-red-500"}>
-                      {deviceStatus?.battery ? `${Math.round(deviceStatus.battery)}% OK` : "100% OK"}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: SETTINGS */}
-          {activeTab === "settings" && (
-            <div className="glass-card rounded-3xl p-6 max-w-2xl mx-auto space-y-6">
-              <div className="border-b pb-4">
-                <h2 className="font-display text-xl font-semibold">Dashboard Configurations</h2>
-                <p className="text-xs text-muted-foreground">Manage endpoints and simulator services</p>
-              </div>
-
-              <div className="space-y-5">
-                {/* Simulator Mode */}
-                <div className="flex items-center justify-between border-b pb-4">
-                  <div className="max-w-md">
-                    <h3 className="text-sm font-semibold">ESP32 Hardware Simulation</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Enable simulated sensor streams to test UI rendering and ML model predictions without physical hardware connected.
-                    </p>
-                  </div>
-                  
-                  {/* Simulation Toggle Switch */}
-                  <button
-                    onClick={() => toggleSimulator(!isSimulating)}
-                    className={`relative w-12 h-6 rounded-full transition-colors duration-200 focus:outline-none ${isSimulating ? 'bg-primary' : 'bg-muted'}`}
-                  >
-                    <span
-                      className={`absolute left-0.5 top-0.5 bg-white w-5 h-5 rounded-full shadow transition-transform duration-200 ${isSimulating ? 'translate-x-6' : ''}`}
-                    />
-                  </button>
-                </div>
-
-                {/* API Endpoint Configuration */}
-                <div className="space-y-4">
-                  <h3 className="text-sm font-semibold uppercase tracking-wider">Service Endpoints</h3>
-                  
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-[10px] uppercase tracking-wider text-muted-foreground block">Express Server IP (Node.js)</label>
-                      <input
-                        type="text"
-                        value={BACKEND_URL}
-                        disabled
-                        className="w-full bg-secondary/40 border rounded-xl px-3.5 py-2.5 text-xs text-muted-foreground mt-1 cursor-not-allowed"
-                      />
-                      <span className="text-[9px] text-green-600 font-mono mt-0.5 block">✓ Endpoint Status: Online</span>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] uppercase tracking-wider text-muted-foreground block">ML Prediction Service IP (Python Flask)</label>
-                      <input
-                        type="text"
-                        value="http://localhost:5001"
-                        disabled
-                        className="w-full bg-secondary/40 border rounded-xl px-3.5 py-2.5 text-xs text-muted-foreground mt-1 cursor-not-allowed"
-                      />
-                      <span className={`text-[9px] font-mono mt-0.5 block ${mlServiceOnline ? 'text-green-600' : 'text-red-500'}`}>
-                        {mlServiceOnline ? "✓ Endpoint Status: Online (MLP & LSTM models ready)" : "✗ Endpoint Status: Offline (Run: python backend/ml_service.py)"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* DB status info */}
-                <div className="border-t pt-4 space-y-2">
-                  <h3 className="text-sm font-semibold uppercase tracking-wider">Database Status</h3>
-                  <div className="flex items-center gap-2 p-3 bg-green-500/5 border border-green-500/20 rounded-xl text-xs text-green-700">
-                    <Check className="h-4 w-4 bg-green-600 text-white rounded-full p-0.5" />
-                    <span>MongoDB Atlas connected successfully. Session logs will persist automatically.</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </main>
       </div>
 
