@@ -5,6 +5,9 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const { SerialPort } = require("serialport");
 const { ReadlineParser } = require("@serialport/parser-readline");
+const path = require("path");
+const { HardwareManager } = require("./hardware");
+
 
 // ======================================================
 // APP SETUP
@@ -75,6 +78,19 @@ let batteryDirection = -1;
 const firmwareVersion = "v3.2.1";
 const sensorCount = 64;
 
+const hardwareManager = new HardwareManager(path.join(__dirname, "hardware_config.json"));
+
+// Register hardware listener
+hardwareManager.onSensorData(async (sensorData) => {
+  if (!simulationMode) {
+    await processSensorData(sensorData, hardwareManager.activeMode);
+  }
+});
+
+// Auto connect at startup
+hardwareManager.reconnect();
+
+
 
 // ======================================================
 // HELPER FOR ML SERVICE PREDICTION
@@ -114,16 +130,12 @@ async function getMLPredictions(matrix, status, sessionId) {
 // ======================================================
 async function processSensorData(data, mode) {
   try {
-    if (!currentSession) {
-      return;
-    }
-
     if (!data.matrix || data.matrix.length !== 64) {
       console.log("Invalid matrix length received:", data.matrix ? data.matrix.length : 0);
       return;
     }
 
-    const sessionId = `${currentSession.patientName}_${currentSession.sessionNumber}`;
+    const sessionId = currentSession ? `${currentSession.patientName}_${currentSession.sessionNumber}` : "live_preview";
     
     // Get predictions from the Python ML service
     const predictions = await getMLPredictions(data.matrix, data.status, sessionId);
@@ -135,11 +147,14 @@ async function processSensorData(data, mode) {
     // otherwise we fallback to the raw maximum force.
     const predicted_force = predictions ? predictions.predicted_force : Number(data.max_force);
 
+    // Get dynamic thresholds from hardware config
+    const thresholds = hardwareManager.config.thresholds || { low: 35.0, high: 75.0 };
+
     // Perform clinical validation check (based on drift-compensated force if available)
     let validation = "Correct Pressure";
-    if (predicted_force < 35.0) {
+    if (predicted_force < thresholds.low) {
       validation = "Low Pressure";
-    } else if (predicted_force > 75.0) {
+    } else if (predicted_force > thresholds.high) {
       validation = "High Pressure";
     }
 
@@ -158,20 +173,26 @@ async function processSensorData(data, mode) {
     // Emit live packet to Socket.io frontend clients
     io.emit("sensorData", sensorPacket);
 
-    // Save reading to MongoDB Atlas database session document
-    await Session.updateOne(
-      {
-        patientName: currentSession.patientName,
-        sessionNumber: currentSession.sessionNumber
-      },
-      {
-        $push: {
-          readings: sensorPacket
+    // Save reading to MongoDB Atlas database session document if session is active
+    if (currentSession) {
+      await Session.updateOne(
+        {
+          patientName: currentSession.patientName,
+          sessionNumber: currentSession.sessionNumber
+        },
+        {
+          $push: {
+            readings: sensorPacket
+          }
         }
+      );
+      console.log(`[${mode}] Stored data | Peak Raw Force: ${data.max_force}N | ML Force: ${predicted_force.toFixed(2)}N | Weight: ${predicted_weight.toFixed(1)}g`);
+    } else {
+      // Just log preview occasionally to prevent log spam
+      if (Math.random() < 0.05) {
+        console.log(`[${mode} Preview] Peak Raw Force: ${data.max_force}N | ML Force: ${predicted_force.toFixed(2)}N | Weight: ${predicted_weight.toFixed(1)}g`);
       }
-    );
-
-    console.log(`[${mode}] Stored data | Peak Raw Force: ${data.max_force}N | ML Force: ${predicted_force.toFixed(2)}N | Weight: ${predicted_weight.toFixed(1)}g`);
+    }
   } catch (err) {
     console.log("Sensor Processing Error:", err);
   }
@@ -377,6 +398,9 @@ app.get("/com-ports", async (req, res) => {
   try {
     const list = await SerialPort.list();
     const paths = list.map(p => p.path);
+    const activePortPath = hardwareManager.activeMode === "USB" && hardwareManager.currentInterface && hardwareManager.currentInterface.status === "Connected"
+      ? hardwareManager.config.usb.path
+      : null;
     res.send({ paths, activePortPath });
   } catch (err) {
     console.log("COM Listing error:", err);
@@ -389,51 +413,52 @@ app.post("/connect-usb", async (req, res) => {
   const { path } = req.body;
   
   try {
-    // Close existing connection if any
-    if (serialPortInstance && serialPortInstance.isOpen) {
-      await new Promise(resolve => serialPortInstance.close(resolve));
-      serialPortInstance = null;
-      activePortPath = null;
-    }
-
-    if (!path) {
-      return res.send({ success: true, message: "Disconnected USB Serial" });
-    }
-
-    serialPortInstance = new SerialPort({
-      path,
-      baudRate: 115200,
-      autoOpen: false
-    });
-
-    serialPortInstance.open((err) => {
-      if (err) {
-        console.log("USB serial open error:", err.message);
-        return res.status(500).send({ success: false, message: err.message });
+    hardwareManager.config.usb.path = path || "";
+    hardwareManager.saveConfig();
+    
+    if (path) {
+      hardwareManager.setActiveMode("USB");
+    } else {
+      if (hardwareManager.activeMode === "USB" && hardwareManager.currentInterface) {
+        hardwareManager.currentInterface.disconnect();
       }
-
-      activePortPath = path;
-      console.log(`✓ USB Serial Port Connected: ${path}`);
-      
-      const parser = serialPortInstance.pipe(new ReadlineParser({ delimiter: "\n" }));
-      parser.on("data", async (line) => {
-        try {
-          const sensorData = JSON.parse(line.trim());
-          await processSensorData(sensorData, "USB");
-        } catch (parseErr) {
-          // Ignore lines that don't match JSON
-        }
-      });
-      
-      res.send({ success: true, message: `Connected to ${path}` });
-    });
+    }
+    
+    res.send({ success: true, message: path ? `Connected to ${path}` : "Disconnected USB Serial" });
   } catch (err) {
     console.log("USB connection error:", err);
     res.status(500).send({ success: false, message: err.message });
   }
 });
 
-// WiFi REST data ingestion endpoint
+// Set active mode route (called by mode selector page)
+app.post("/set-active-mode", (req, res) => {
+  const { mode } = req.body;
+  try {
+    hardwareManager.setActiveMode(mode);
+    res.send({ success: true, activeMode: hardwareManager.activeMode });
+  } catch (err) {
+    res.status(500).send({ success: false, error: err.message });
+  }
+});
+
+// Update & Save hardware config route (called by device configuration inputs)
+app.post("/save-hardware-config", (req, res) => {
+  try {
+    const { usb, wifi, bluetooth, thresholds } = req.body;
+    if (usb) hardwareManager.config.usb = usb;
+    if (wifi) hardwareManager.config.wifi = wifi;
+    if (bluetooth) hardwareManager.config.bluetooth = bluetooth;
+    if (thresholds) hardwareManager.config.thresholds = thresholds;
+    hardwareManager.saveConfig();
+    hardwareManager.reconnect();
+    res.send({ success: true, config: hardwareManager.config });
+  } catch (err) {
+    res.status(500).send({ success: false, error: err.message });
+  }
+});
+
+// WiFi REST data ingestion endpoint (legacy compatibility)
 app.post("/esp-data", async (req, res) => {
   try {
     await processSensorData(req.body, "WiFi");
@@ -444,7 +469,7 @@ app.post("/esp-data", async (req, res) => {
   }
 });
 
-// Bluetooth REST data ingestion endpoint
+// Bluetooth REST data ingestion endpoint (legacy compatibility)
 app.post("/bluetooth-data", async (req, res) => {
   try {
     await processSensorData(req.body, "Bluetooth");
@@ -456,9 +481,7 @@ app.post("/bluetooth-data", async (req, res) => {
 });
 
 app.get("/device-status", (req, res) => {
-
   if (simulationMode) {
-
     simulatedBattery += batteryDirection * 0.2;
 
     if (simulatedBattery <= 20)
@@ -468,12 +491,16 @@ app.get("/device-status", (req, res) => {
       batteryDirection = -1;
   }
 
+  const statusInfo = hardwareManager.getStatus();
+
   res.json({
     battery: Math.round(simulatedBattery),
     firmware: firmwareVersion,
-    sensors: sensorCount
+    sensors: sensorCount,
+    status: simulationMode ? "Connected" : statusInfo.status,
+    mode: simulationMode ? "Simulated" : statusInfo.mode,
+    config: statusInfo.config
   });
-
 });
 
 // ======================================================

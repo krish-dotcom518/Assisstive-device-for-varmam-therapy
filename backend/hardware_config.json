@@ -1,0 +1,17 @@
+{
+  "activeMode": "USB",
+  "usb": {
+    "path": ""
+  },
+  "bluetooth": {
+    "deviceName": "Varmam_Therapy_BLE"
+  },
+  "wifi": {
+    "ip": "192.168.4.1",
+    "port": 8080
+  },
+  "thresholds": {
+    "low": 35,
+    "high": 75
+  }
+}

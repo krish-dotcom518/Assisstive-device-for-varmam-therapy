@@ -59,6 +59,15 @@ function DashboardPage() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [mlServiceOnline, setMlServiceOnline] = useState(false);
 
+  // Hardware status & configuration states
+  const [deviceStatus, setDeviceStatus] = useState<any>(null);
+  const [wifiIp, setWifiIp] = useState("");
+  const [wifiPort, setWifiPort] = useState("");
+  const [bleDeviceName, setBleDeviceName] = useState("");
+  const [thresholdLow, setThresholdLow] = useState("");
+  const [thresholdHigh, setThresholdHigh] = useState("");
+  const configLoadedRef = useRef(false);
+
   // Notifications
   const [notifications, setNotifications] = useState<{ id: string; text: string; type: "info" | "warning" | "error"; time: string }[]>([]);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
@@ -327,6 +336,68 @@ function DashboardPage() {
     setTimeout(() => setApiMsg(null), 3000);
   }
 
+  async function handleSaveHardwareConfig() {
+    try {
+      const res = await apiPost("/save-hardware-config", {
+        usb: { path: selectedComPort },
+        wifi: { ip: wifiIp, port: Number(wifiPort) },
+        bluetooth: { deviceName: bleDeviceName },
+        thresholds: { low: Number(thresholdLow), high: Number(thresholdHigh) }
+      });
+      if (res.success) {
+        setApiMsg({ text: "✅ Hardware configuration updated and saved", ok: true });
+        addNotification("Hardware parameters updated.", "info");
+      } else {
+        setApiMsg({ text: "❌ Configuration update failed", ok: false });
+      }
+    } catch (e) {
+      setApiMsg({ text: "❌ Configuration error", ok: false });
+    }
+    setTimeout(() => setApiMsg(null), 3000);
+  }
+
+  // Fetch device-status dynamically
+  useEffect(() => {
+    const fetchDeviceStatus = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/device-status`);
+        if (res.ok) {
+          const d = await res.json();
+          setDeviceStatus(d);
+          
+          // Keep activeComPort in sync for legacy code
+          if (d.mode === "USB" && d.status === "Connected") {
+            setActiveComPort(d.config?.usb?.path || null);
+          } else {
+            setActiveComPort(null);
+          }
+        }
+      } catch (err) {
+        console.error("Unable to fetch device status:", err);
+      }
+    };
+
+    fetchDeviceStatus();
+    const interval = setInterval(fetchDeviceStatus, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Sync inputs from config on first load
+  useEffect(() => {
+    if (deviceStatus?.config && !configLoadedRef.current) {
+      const c = deviceStatus.config;
+      if (c.usb?.path) {
+        setSelectedComPort(c.usb.path);
+      }
+      if (c.wifi?.ip) setWifiIp(c.wifi.ip);
+      if (c.wifi?.port) setWifiPort(String(c.wifi.port));
+      if (c.bluetooth?.deviceName) setBleDeviceName(c.bluetooth.deviceName);
+      if (c.thresholds?.low) setThresholdLow(String(c.thresholds.low));
+      if (c.thresholds?.high) setThresholdHigh(String(c.thresholds.high));
+      configLoadedRef.current = true;
+    }
+  }, [deviceStatus]);
+
   // Health checks & listings
   useEffect(() => {
     fetchComPorts();
@@ -427,9 +498,13 @@ function DashboardPage() {
   const avg = +(flat.reduce((a, b) => a + b, 0) / flat.length).toFixed(1);
   const max = Math.max(...flat);
   
+  // Load dynamic thresholds from config/device status
+  const lowThreshold = deviceStatus?.config?.thresholds?.low ?? 35;
+  const highThreshold = deviceStatus?.config?.thresholds?.high ?? 75;
+
   // validation tone from ML-predicted force if available, otherwise raw avg
   const displayForce = selectedSession || status === "running" ? predictedForce : avg;
-  const validation = displayForce < 35 ? "low" : displayForce > 75 ? "high" : "ok";
+  const validation = displayForce < lowThreshold ? "low" : displayForce > highThreshold ? "high" : "ok";
 
   const ConnIcon = data.therapy.connectivity === "WiFi" ? Wifi : data.therapy.connectivity === "Bluetooth" ? Bluetooth : Cable;
 
@@ -589,7 +664,7 @@ function DashboardPage() {
                 <Metric icon={Activity} label="Drift Compensated" value={status === "running" || selectedSession ? predictedForce.toFixed(1) : "0.0"} unit="N" trend="LSTM model" tone="success" />
                 <Metric icon={TrendingUp} label="Predicted Weight" value={status === "running" || selectedSession ? predictedWeight.toFixed(0) : "0"} unit="g" trend="MLP model" tone="success" />
                 <Metric icon={ConnIcon} label="Connectivity" value={selectedSession ? "File Read" : (data.therapy.connectivity || "—")} unit="" trend="active path" tone="primary" />
-                <Metric icon={CheckCircle2} label="Status Band" value={validation === "ok" ? "Optimal" : validation === "low" ? "Low" : "High"} unit="" trend={validation === "ok" ? "35 - 75 N" : "Alert Range"} tone={validation === "ok" ? "success" : "destructive"} />
+                <Metric icon={CheckCircle2} label="Status Band" value={validation === "ok" ? "Optimal" : validation === "low" ? "Low" : "High"} unit="" trend={validation === "ok" ? `${lowThreshold} - ${highThreshold} N` : "Alert Range"} tone={validation === "ok" ? "success" : validation === "low" ? "info" : "destructive"} />
               </div>
 
               {/* Force plot and heatmap */}
@@ -653,9 +728,9 @@ function DashboardPage() {
                   
                   {/* Validation Threshold visual indicators */}
                   <div className="mt-4 flex items-center justify-between text-[10px] text-muted-foreground border-t pt-3">
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" /> &gt;75 N High Limit</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-green-500" /> 35-75 N Optimal Band</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" /> &lt;35 N Low Limit</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" /> &gt;{highThreshold} N High Limit</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-green-500" /> {lowThreshold}-{highThreshold} N Optimal Band</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" /> &lt;{lowThreshold} N Low Limit</span>
                   </div>
                 </section>
               </div>
@@ -666,9 +741,9 @@ function DashboardPage() {
                 <section className="glass-card rounded-3xl p-6">
                   <CardHeader title="Clinical Threshold Alerts" sub="Clinical limits mapped dynamically from model outputs" />
                   <div className="mt-4 space-y-3">
-                    <AlertRow tone="success" icon={CheckCircle2} title="Correct Varmam Pressure" detail="Applied force resides within 35–75 N therapeutic band" active={validation === "ok"} />
-                    <AlertRow tone="warning" icon={AlertTriangle} title="Insufficient Varmam Pressure" detail="Applied force is below the 35 N stimulation threshold" active={validation === "low"} />
-                    <AlertRow tone="destructive" icon={AlertTriangle} title="Excessive Varmam Pressure" detail="Applied force exceeds safe physiological limit of 75 N" active={validation === "high"} />
+                    <AlertRow tone="success" icon={CheckCircle2} title="Correct Varmam Pressure" detail={`Applied force resides within ${lowThreshold}–${highThreshold} N therapeutic band`} active={validation === "ok"} />
+                    <AlertRow tone="info" icon={AlertTriangle} title="Insufficient Varmam Pressure" detail={`Applied force is below the ${lowThreshold} N stimulation threshold`} active={validation === "low"} />
+                    <AlertRow tone="destructive" icon={AlertTriangle} title="Excessive Varmam Pressure" detail={`Applied force exceeds safe physiological limit of ${highThreshold} N`} active={validation === "high"} />
                   </div>
                 </section>
 
@@ -923,18 +998,36 @@ function DashboardPage() {
               {/* Status Header */}
               <div className="flex items-center justify-between border bg-secondary/30 rounded-2xl p-5">
                 <div className="flex items-center gap-3">
-                  <div className={`grid h-12 w-12 place-items-center rounded-xl bg-card border ${activeComPort || isSimulating ? 'text-green-500 border-green-500/40 bg-green-500/5' : 'text-muted-foreground'}`}>
-                    <Cpu className="h-6 w-6 animate-pulse" />
+                  <div className={`grid h-12 w-12 place-items-center rounded-xl bg-card border ${
+                    isHardwareConnected ? 'text-green-500 border-green-500/40 bg-green-500/5' : 
+                    isHardwareConnecting ? 'text-amber-500 border-amber-500/40 bg-amber-500/5' : 
+                    'text-muted-foreground'
+                  }`}>
+                    <Cpu className={`h-6 w-6 ${isHardwareConnecting ? 'animate-spin' : isHardwareConnected ? 'animate-pulse' : ''}`} />
                   </div>
                   <div>
                     <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Device Connection</span>
-                    <h3 className="text-base font-bold">{activeComPort ? `Connected via USB (${activeComPort})` : isSimulating ? "Simulating Live Hardware" : "Offline / Unlinked"}</h3>
+                    <h3 className="text-base font-bold">
+                      {isHardwareConnected 
+                        ? `Connected via ${activeHardwareMode} ${activeHardwareMode === "USB" ? `(${deviceStatus?.config?.usb?.path || "Serial"})` : ""}` 
+                        : isHardwareConnecting 
+                        ? `Connecting to ${activeHardwareMode}...` 
+                        : `Offline / Unlinked (${activeHardwareMode})`}
+                    </h3>
                   </div>
                 </div>
                 
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${activeComPort || isSimulating ? 'bg-success/15 text-success' : 'bg-secondary text-muted-foreground'}`}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${activeComPort || isSimulating ? 'bg-success animate-ping' : 'bg-muted-foreground/60'}`} />
-                  {activeComPort || isSimulating ? "System Online" : "Disconnected"}
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${
+                  isHardwareConnected ? 'bg-success/15 text-success' : 
+                  isHardwareConnecting ? 'bg-amber-500/15 text-amber-500' : 
+                  'bg-secondary text-muted-foreground'
+                }`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${
+                    isHardwareConnected ? 'bg-success animate-ping' : 
+                    isHardwareConnecting ? 'bg-amber-500 animate-pulse' : 
+                    'bg-muted-foreground/60'
+                  }`} />
+                  {isHardwareConnected ? "Connected" : isHardwareConnecting ? "Connecting" : "Disconnected"}
                 </span>
               </div>
 
@@ -943,73 +1036,170 @@ function DashboardPage() {
                 <h3 className="text-sm font-semibold uppercase tracking-wider">Configure Connection Method</h3>
                 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {/* USB connection selector */}
+                  {/* Mode Settings Card */}
                   <div className="border rounded-2xl p-5 space-y-4">
-                    <div className="flex items-center gap-2 text-primary">
-                      <Cable className="h-5 w-5" />
-                      <span className="text-sm font-semibold">USB Cable Configuration</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Link the dashboard directly to the ESP32 COM port over micro-USB/Type-C.</p>
-                    
-                    <div className="space-y-2 border-t pt-3">
-                      <label className="text-[10px] uppercase tracking-wider text-muted-foreground block">Select COM Port</label>
-                      <div className="flex gap-2">
-                        <select
-                          value={selectedComPort}
-                          onChange={(e) => setSelectedComPort(e.target.value)}
-                          className="flex-1 rounded-xl border bg-card px-3 py-2 text-xs"
-                        >
-                          {comPorts.length === 0 ? (
-                            <option value="">No COM Ports Found</option>
-                          ) : (
-                            comPorts.map(p => <option key={p} value={p}>{p}</option>)
-                          )}
-                        </select>
-                        <button
-                          onClick={fetchComPorts}
-                          className="grid h-8 w-8 place-items-center rounded-xl border bg-card text-muted-foreground hover:text-foreground"
-                          title="Refresh Ports"
-                        >
-                          <RefreshCw className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
+                    {activeHardwareMode === "USB" ? (
+                      <>
+                        <div className="flex items-center gap-2 text-primary">
+                          <Cable className="h-5 w-5" />
+                          <span className="text-sm font-semibold">USB Cable Configuration</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">Link the dashboard directly to the ESP32 COM port over USB Serial.</p>
+                        
+                        <div className="space-y-2 border-t pt-3">
+                          <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">Select COM Port</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={selectedComPort}
+                              onChange={(e) => setSelectedComPort(e.target.value)}
+                              className="flex-1 rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
+                            >
+                              {comPorts.length === 0 ? (
+                                <option value="">No COM Ports Found</option>
+                              ) : (
+                                comPorts.map(p => <option key={p} value={p}>{p}</option>)
+                              )}
+                            </select>
+                            <button
+                              onClick={fetchComPorts}
+                              className="grid h-8 w-8 place-items-center rounded-xl border bg-card text-muted-foreground hover:text-foreground cursor-pointer"
+                              title="Refresh Ports"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
 
-                      <div className="pt-2 flex gap-2">
-                        <button
-                          onClick={handleComConnect}
-                          disabled={!selectedComPort || activeComPort === selectedComPort}
-                          className="flex-1 bg-primary text-primary-foreground rounded-xl py-2 text-xs font-semibold hover:opacity-90 disabled:opacity-50"
-                        >
-                          Link COM Port
-                        </button>
-                        {activeComPort && (
-                          <button
-                            onClick={handleComDisconnect}
-                            className="border border-red-500 text-red-500 bg-red-500/5 rounded-xl px-3 py-2 text-xs font-semibold hover:bg-red-500 hover:text-white"
-                          >
-                            Unlink
-                          </button>
-                        )}
-                      </div>
-                    </div>
+                          <div className="pt-2 flex gap-2">
+                            <button
+                              onClick={handleComConnect}
+                              disabled={!selectedComPort || isHardwareConnected}
+                              className="flex-1 bg-primary text-primary-foreground rounded-xl py-2 text-xs font-semibold hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                            >
+                              {isHardwareConnecting ? "Linking..." : "Link COM Port"}
+                            </button>
+                            {isHardwareConnected && (
+                              <button
+                                onClick={handleComDisconnect}
+                                className="border border-red-500 text-red-500 bg-red-500/5 rounded-xl px-3 py-2 text-xs font-semibold hover:bg-red-500 hover:text-white cursor-pointer"
+                              >
+                                Unlink
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    ) : activeHardwareMode === "WiFi" ? (
+                      <>
+                        <div className="flex items-center gap-2 text-primary">
+                          <Wifi className="h-5 w-5" />
+                          <span className="text-sm font-semibold">Wi-Fi TCP Client Configuration</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">Connect to the ESP32 TCP server streaming CSV sensor frames wirelessly.</p>
+                        
+                        <div className="space-y-3 border-t pt-3">
+                          <div className="space-y-1">
+                            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">IP Address</label>
+                            <input
+                              type="text"
+                              value={wifiIp}
+                              onChange={(e) => setWifiIp(e.target.value)}
+                              placeholder="e.g. 192.168.4.1"
+                              className="w-full rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
+                            />
+                          </div>
+                          
+                          <div className="space-y-1">
+                            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">Port</label>
+                            <input
+                              type="text"
+                              value={wifiPort}
+                              onChange={(e) => setWifiPort(e.target.value)}
+                              placeholder="e.g. 8080"
+                              className="w-full rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
+                            />
+                          </div>
+
+                          <div className="pt-2">
+                            <button
+                              onClick={handleSaveHardwareConfig}
+                              className="w-full bg-primary text-primary-foreground rounded-xl py-2 text-xs font-semibold hover:opacity-90 cursor-pointer"
+                            >
+                              Save & Connect Wi-Fi
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 text-primary">
+                          <Bluetooth className="h-5 w-5" />
+                          <span className="text-sm font-semibold">Bluetooth BLE Configuration</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">Scan and connect to the ESP32 BLE server notifying CSV sensor packets.</p>
+                        
+                        <div className="space-y-3 border-t pt-3">
+                          <div className="space-y-1">
+                            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">BLE Device Name</label>
+                            <input
+                              type="text"
+                              value={bleDeviceName}
+                              onChange={(e) => setBleDeviceName(e.target.value)}
+                              placeholder="e.g. Varmam_Therapy_BLE"
+                              className="w-full rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
+                            />
+                          </div>
+
+                          <div className="pt-2">
+                            <button
+                              onClick={handleSaveHardwareConfig}
+                              className="w-full bg-primary text-primary-foreground rounded-xl py-2 text-xs font-semibold hover:opacity-90 cursor-pointer"
+                            >
+                              Save & Scan BLE
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
 
-                  {/* WiFi/Bluetooth API details */}
+                  {/* Clinical Threshold Config Card */}
                   <div className="border rounded-2xl p-5 space-y-4">
                     <div className="flex items-center gap-2 text-primary">
-                      <Wifi className="h-5 w-5" />
-                      <span className="text-sm font-semibold">Wireless Ingestion</span>
+                      <Settings className="h-5 w-5" />
+                      <span className="text-sm font-semibold">Pressure Threshold Config</span>
                     </div>
-                    <p className="text-xs text-muted-foreground">Receive sensor packets from ESP32 wirelessly over network protocols.</p>
+                    <p className="text-xs text-muted-foreground">Configure the clinical force thresholds (Newtons) stored in the backend.</p>
                     
-                    <div className="space-y-2 border-t pt-3 text-[11px]">
-                      <div className="p-2.5 bg-secondary/40 rounded-xl font-mono text-[10px]">
-                        <strong>WiFi:</strong> POST JSON to <br />
-                        <span className="text-primary">{BACKEND_URL}/esp-data</span>
+                    <div className="space-y-3 border-t pt-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">Low Stimulation Threshold (N)</label>
+                        <input
+                          type="number"
+                          value={thresholdLow}
+                          onChange={(e) => setThresholdLow(e.target.value)}
+                          placeholder="35"
+                          className="w-full rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
+                        />
                       </div>
-                      <div className="p-2.5 bg-secondary/40 rounded-xl font-mono text-[10px]">
-                        <strong>Bluetooth:</strong> POST JSON to <br />
-                        <span className="text-primary">{BACKEND_URL}/bluetooth-data</span>
+                      
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase tracking-wider text-muted-foreground block font-bold">High Overpressure Threshold (N)</label>
+                        <input
+                          type="number"
+                          value={thresholdHigh}
+                          onChange={(e) => setThresholdHigh(e.target.value)}
+                          placeholder="75"
+                          className="w-full rounded-xl border bg-card px-3 py-2 text-xs text-foreground"
+                        />
+                      </div>
+
+                      <div className="pt-2">
+                        <button
+                          onClick={handleSaveHardwareConfig}
+                          className="w-full bg-primary text-primary-foreground rounded-xl py-2 text-xs font-semibold hover:opacity-90 cursor-pointer"
+                        >
+                          Save Thresholds
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1022,15 +1212,17 @@ function DashboardPage() {
                 <div className="grid grid-cols-3 gap-2 text-center text-xs">
                   <div className="bg-secondary/30 p-2.5 rounded-xl border">
                     <span className="text-[10px] text-muted-foreground block">Firmware</span>
-                    <strong className="text-foreground">v3.2.1</strong>
+                    <strong className="text-foreground">{deviceStatus?.firmware || firmwareVersion}</strong>
                   </div>
                   <div className="bg-secondary/30 p-2.5 rounded-xl border">
                     <span className="text-[10px] text-muted-foreground block">Sensors</span>
-                    <strong className="text-foreground">8x8 Matrix</strong>
+                    <strong className="text-foreground">{deviceStatus?.sensors ? `${deviceStatus.sensors} Cells` : "8x8 Matrix"}</strong>
                   </div>
                   <div className="bg-secondary/30 p-2.5 rounded-xl border">
                     <span className="text-[10px] text-muted-foreground block">Battery</span>
-                    <strong className="text-green-500">92% OK</strong>
+                    <strong className={deviceStatus?.battery && deviceStatus.battery > 20 ? "text-green-500" : "text-red-500"}>
+                      {deviceStatus?.battery ? `${Math.round(deviceStatus.battery)}% OK` : "100% OK"}
+                    </strong>
                   </div>
                 </div>
               </div>
@@ -1155,12 +1347,13 @@ function CardHeader({ title, sub, children }: { title: string; sub?: string; chi
 
 function Metric({
   icon: Icon, label, value, unit, trend, tone,
-}: { icon: any; label: string; value: string; unit: string; trend: string; tone: "primary" | "success" | "warning" | "destructive" }) {
+}: { icon: any; label: string; value: string; unit: string; trend: string; tone: "primary" | "success" | "warning" | "destructive" | "info" }) {
   const tones: Record<string, string> = {
     primary: "text-primary bg-primary/10",
     success: "text-green-600 bg-green-500/10",
     warning: "text-amber-500 bg-amber-500/10",
     destructive: "text-red-500 bg-red-500/10",
+    info: "text-blue-500 bg-blue-500/10",
   };
   return (
     <div className="glass-card rounded-2xl p-4 border bg-card shadow-sm hover:shadow-md transition">
@@ -1187,11 +1380,12 @@ function Legend() {
   );
 }
 
-function AlertRow({ tone, icon: Icon, title, detail, active }: { tone: "success" | "warning" | "destructive"; icon: any; title: string; detail: string; active: boolean }) {
+function AlertRow({ tone, icon: Icon, title, detail, active }: { tone: "success" | "warning" | "destructive" | "info"; icon: any; title: string; detail: string; active: boolean }) {
   const tones = {
     success: "border-green-500/30 bg-green-500/5 text-green-700",
     warning: "border-amber-500/30 bg-amber-500/5 text-amber-700",
     destructive: "border-red-500/30 bg-red-500/5 text-red-700",
+    info: "border-blue-500/30 bg-blue-500/5 text-blue-700",
   } as const;
   return (
     <div className={`relative flex items-start gap-3 rounded-2xl border p-3.5 transition-all ${active ? tones[tone] + ' shadow-sm' : 'border-border/60 opacity-60'}`}>
