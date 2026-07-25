@@ -1,7 +1,7 @@
 {
   "activeMode": "USB",
   "usb": {
-    "path": ""
+    "path": "COM9"
   },
   "bluetooth": {
     "deviceName": "Varmam_Therapy_BLE"

@@ -102,6 +102,20 @@ class USBSerialInterface extends HardwareInterface {
     this.status = "Disconnected";
     console.log("[USB] Disconnected.");
   }
+  
+  startReading() {
+    if (this.port && this.port.isOpen) {
+        this.port.write("START\n");
+        console.log("[USB] START command sent");
+    }
+}
+
+stopReading() {
+    if (this.port && this.port.isOpen) {
+        this.port.write("STOP\n");
+        console.log("[USB] STOP command sent");
+    }
+}
 
   scheduleReconnect() {
     if (this.isClosedIntentionally) return;
@@ -443,6 +457,24 @@ class HardwareManager {
       config: this.config
     };
   }
+  
+  startMonitoring() {
+    if (
+        this.currentInterface &&
+        typeof this.currentInterface.startReading === "function"
+    ) {
+        this.currentInterface.startReading();
+    }
+}
+
+stopMonitoring() {
+    if (
+        this.currentInterface &&
+        typeof this.currentInterface.stopReading === "function"
+    ) {
+        this.currentInterface.stopReading();
+    }
+}
 
   reconnect() {
     if (this.currentInterface) {

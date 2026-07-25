@@ -303,6 +303,7 @@ app.post("/session-start", async (req, res) => {
       startTime: new Date(),
       readings: []
     };
+    hardwareManager.startMonitoring();
 
     lastReadingTime = null;
 
@@ -373,6 +374,7 @@ app.post("/end-session", async (req, res) => {
 
     console.log(`✓ Session Ended for patient: ${currentSession.patientName}`);
     currentSession = null;
+    hardwareManager.stopMonitoring();
     res.send({ message: "Session ended successfully" });
   } catch (err) {
     console.log(err);
