@@ -25,7 +25,7 @@ const io = new Server(server, {
 // MONGODB CONNECTION
 // ======================================================
 mongoose.connect(
-  "mongodb+srv://krishikavenkatesan55_db_user:GxzufwGvdJCjhmga@cluster0.o9r7xyh.mongodb.net/varmamDB?retryWrites=true&w=majority&appName=Cluster0"
+  "mongodb+srv://krishikavenkatesan55_db_user:AWL6Y9DScIEFLjRy@cluster0.o9r7xyh.mongodb.net/varmamDB?retryWrites=true&w=majority&appName=Cluster0"
 )
 .then(() => console.log("✓ MongoDB Atlas Connected"))
 .catch((err) => console.log("MongoDB connection error:", err));
@@ -75,6 +75,8 @@ let serialPortInstance = null;
 let activePortPath = null;
 let simulatedBattery = 100;
 let batteryDirection = -1;
+let hardwareConnected = false;
+let hardwareMode = null;
 const firmwareVersion = "v3.2.1";
 const sensorCount = 64;
 
@@ -258,7 +260,32 @@ function stopSimulator() {
 app.get("/", (req, res) => {
   res.send("Varmam Clinical Backend Running Successfully");
 });
+app.post("/connect-hardware", async (req, res) => {
 
+    try{
+
+        hardwareMode = req.body.mode;
+
+        hardwareConnected = true;
+
+        console.log(`✓ Hardware Connected using ${hardwareMode}`);
+
+        res.send({
+            success:true,
+            connected:true
+        });
+
+    }catch(err){
+
+        hardwareConnected=false;
+
+        res.status(500).send({
+            success:false
+        });
+
+    }
+
+});
 // List all sessions (excluding full readings array for efficiency)
 app.get("/sessions", async (req, res) => {
   try {
@@ -298,13 +325,39 @@ app.get("/next-session/:patientName", async (req, res) => {
 // Start session
 app.post("/session-start", async (req, res) => {
   try {
+    
     currentSession = {
       ...req.body,
       startTime: new Date(),
       readings: []
     };
-    hardwareManager.startMonitoring();
+    if(!hardwareConnected){
 
+    return res.status(400).send({
+        message:"Hardware not connected"
+    });
+
+}
+    hardwareManager.startMonitoring();
+    if(hardwareMode==="USB"){
+
+    serialPortInstance.write("START\n");
+
+}
+if(hardwareMode==="Bluetooth"){
+
+    bluetoothSocket.write("START");
+
+}
+if(hardwareMode==="WiFi"){
+
+    await fetch("http://ESP_IP/start",{
+
+        method:"POST"
+
+    });
+
+}
     lastReadingTime = null;
 
     // Upsert session details in MongoDB Atlas
@@ -373,6 +426,25 @@ app.post("/end-session", async (req, res) => {
     );
 
     console.log(`✓ Session Ended for patient: ${currentSession.patientName}`);
+    if(hardwareMode==="USB"){
+
+    serialPortInstance.write("STOP\n");
+
+}
+if(hardwareMode==="Bluetooth"){
+
+    bluetoothSocket.write("STOP");
+
+}
+if(hardwareMode==="WiFi"){
+
+    await fetch("http://ESP_IP/stop",{
+
+        method:"POST"
+
+    });
+
+}
     currentSession = null;
     hardwareManager.stopMonitoring();
     res.send({ message: "Session ended successfully" });

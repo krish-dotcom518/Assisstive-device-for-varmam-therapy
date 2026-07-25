@@ -229,7 +229,27 @@ class WiFiInterface extends HardwareInterface {
     this.status = "Disconnected";
     console.log("[Wi-Fi] Disconnected.");
   }
+  startReading() {
 
+    if (this.client) {
+
+        this.client.write("START\n");
+        console.log("[Wi-Fi] START command sent");
+
+    }
+
+}
+
+stopReading() {
+
+    if (this.client) {
+
+        this.client.write("STOP\n");
+        console.log("[Wi-Fi] STOP command sent");
+
+    }
+
+}
   scheduleReconnect() {
     if (this.isClosedIntentionally) return;
     if (this.reconnectTimer) return;

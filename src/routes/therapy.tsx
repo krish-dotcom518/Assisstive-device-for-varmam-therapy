@@ -66,23 +66,50 @@ useEffect(() => {
   return () => clearInterval(interval);
 }, []);
 
-  const pickMode = (mode: typeof MODES[number]["id"]) => {
-    setConnecting(mode);
-    setConnected(false);
-    update("therapy", { connectivity: mode });
-    
-    // Notify backend of the selected connectivity mode
-    fetch("http://localhost:5000/set-active-mode", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode })
-    }).catch(err => console.error("Error setting active mode:", err));
+  const pickMode = async (mode: typeof MODES[number]["id"]) => {
 
-    setTimeout(() => {
-      setConnecting(null);
-      setConnected(true);
-    }, 1400);
-  };
+    setConnecting(mode);
+
+    setConnected(false);
+
+    update("therapy",{
+        connectivity:mode
+    });
+
+    try{
+
+        const res=await fetch("http://localhost:5000/connect-hardware",{
+
+            method:"POST",
+
+            headers:{
+                "Content-Type":"application/json"
+            },
+
+            body:JSON.stringify({
+                mode
+            })
+
+        });
+
+        const data=await res.json();
+
+        if(data.connected){
+
+            setConnected(true);
+
+        }
+
+    }
+    catch(err){
+
+        alert("Unable to connect hardware");
+
+    }
+
+    setConnecting(null);
+
+};
 
   return (
     <StepShell>
