@@ -1,5 +1,5 @@
 {
-  "activeMode": "wifi",
+  "activeMode": "Bluetooth",
   "usb": {
     "path": "COM9"
   },

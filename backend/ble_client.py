@@ -83,14 +83,26 @@ async def main():
 
     try:
 
-        devices = await BleakScanner.discover(timeout=5)
-
-        for d in devices:
-
+        devices_dict = await BleakScanner.discover(timeout=5.0, return_adv=True)
+        
+        print(f"[BLE Scan Debug] Scanned {len(devices_dict)} devices:", file=sys.stderr, flush=True)
+        for addr, (d, adv) in devices_dict.items():
+            print(f"  - Address: {addr} | Name: {d.name} | LocalName: {adv.local_name} | UUIDs: {adv.service_uuids}", file=sys.stderr, flush=True)
+            
+            name_match = False
             if d.name and target_name.lower() in d.name.lower():
-
+                name_match = True
+            elif adv.local_name and target_name.lower() in adv.local_name.lower():
+                name_match = True
+                
+            uuid_match = False
+            if adv.service_uuids:
+                uuids = [u.lower() for u in adv.service_uuids]
+                if SERVICE_UUID.lower() in uuids:
+                    uuid_match = True
+                    
+            if name_match or uuid_match:
                 device = d
-                break
 
     except Exception as e:
 

@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const net = require("net");
+const os = require("os");
 const { spawn } = require("child_process");
 const readline = require("readline");
 const { SerialPort } = require("serialport");
@@ -54,7 +55,7 @@ class USBSerialInterface extends HardwareInterface {
       this.port.open((err) => {
         if (err) {
           console.error(`[USB] Open error on ${this.path}:`, err.message);
-          this.status = "Disconnected";
+          this.status = "Failed";
           this.scheduleReconnect();
           return;
         }
@@ -78,7 +79,7 @@ class USBSerialInterface extends HardwareInterface {
 
       this.port.on("error", (err) => {
         console.error("[USB] Port error:", err.message);
-        this.status = "Disconnected";
+        this.status = "Failed";
         if (!this.isClosedIntentionally) {
           this.scheduleReconnect();
         }
@@ -175,6 +176,26 @@ class WiFiInterface extends HardwareInterface {
       return;
     }
 
+    // Warn if not on same subnet
+    if (this.ip.startsWith("192.168.4.")) {
+      const interfaces = os.networkInterfaces();
+      let sameSubnet = false;
+      for (const name of Object.keys(interfaces)) {
+        for (const netInterface of interfaces[name]) {
+          if (netInterface.family === "IPv4" && !netInterface.internal) {
+            if (netInterface.address.startsWith("192.168.4.")) {
+              sameSubnet = true;
+              break;
+            }
+          }
+        }
+        if (sameSubnet) break;
+      }
+      if (!sameSubnet) {
+        console.warn(`[Wi-Fi] ⚠️ WARNING: Your computer is NOT connected to the ESP32 Wi-Fi subnet. Please connect your Wi-Fi to the ESP32 Access Point (IP should start with 192.168.4.x).`);
+      }
+    }
+
     console.log(`[Wi-Fi] Connecting to ${this.ip}:${this.port}...`);
     this.status = "Connecting";
     this.isClosedIntentionally = false;
@@ -209,7 +230,7 @@ class WiFiInterface extends HardwareInterface {
 
     this.client.on("error", (err) => {
       console.error("[Wi-Fi] Socket error:", err.message);
-      this.status = "Disconnected";
+      this.status = "Failed";
       if (!this.isClosedIntentionally) {
         this.scheduleReconnect();
       }
@@ -325,7 +346,7 @@ class BLEInterface extends HardwareInterface {
           this.status = "Connected";
         } else if (line === "NOT_FOUND") {
           console.error(`[Bluetooth] BLE device ${this.deviceName} not found.`);
-          this.status = "Disconnected";
+          this.status = "Failed";
         } else if (line.startsWith("DATA:")) {
           this.status = "Connected";
           const csvData = line.substring(5);
@@ -339,7 +360,11 @@ class BLEInterface extends HardwareInterface {
 
       this.pyProcess.on("close", (code) => {
         console.log(`[Bluetooth] BLE Helper exited with code ${code}`);
-        this.status = "Disconnected";
+        if (this.status !== "Connected" && !this.isClosedIntentionally) {
+          this.status = "Failed";
+        } else {
+          this.status = "Disconnected";
+        }
         if (!this.isClosedIntentionally) {
           this.scheduleReconnect();
         }
@@ -363,6 +388,20 @@ class BLEInterface extends HardwareInterface {
     }
     this.status = "Disconnected";
     console.log("[Bluetooth] Disconnected.");
+  }
+
+  startReading() {
+    if (this.pyProcess && this.pyProcess.stdin) {
+      this.pyProcess.stdin.write("START\n");
+      console.log("[Bluetooth] START command sent");
+    }
+  }
+
+  stopReading() {
+    if (this.pyProcess && this.pyProcess.stdin) {
+      this.pyProcess.stdin.write("STOP\n");
+      console.log("[Bluetooth] STOP command sent");
+    }
   }
 
   scheduleReconnect() {
@@ -452,15 +491,15 @@ class HardwareManager {
       normalizedMode = "WiFi";
     } else if (mode === "Bluetooth" || mode === "BLE") {
       normalizedMode = "Bluetooth";
+    } else if (mode === "USB" || mode === "USB Cable") {
+      normalizedMode = "USB";
     }
 
-    if (this.activeMode !== normalizedMode || !this.currentInterface) {
-      console.log(`[HardwareManager] Switching mode from ${this.activeMode} to ${normalizedMode}`);
-      this.activeMode = normalizedMode;
-      this.config.activeMode = normalizedMode;
-      this.saveConfig();
-      this.reconnect();
-    }
+    console.log(`[HardwareManager] Setting active mode to ${normalizedMode}`);
+    this.activeMode = normalizedMode;
+    this.config.activeMode = normalizedMode;
+    this.saveConfig();
+    this.reconnect();
   }
 
   onSensorData(callback) {

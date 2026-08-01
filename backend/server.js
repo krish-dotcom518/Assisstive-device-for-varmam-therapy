@@ -331,33 +331,15 @@ app.post("/session-start", async (req, res) => {
       startTime: new Date(),
       readings: []
     };
-    if(!hardwareConnected){
+    
+    const statusInfo = hardwareManager.getStatus();
+    if (statusInfo.status !== "Connected" && !simulationMode) {
+      return res.status(400).send({
+        message: "Hardware not connected"
+      });
+    }
 
-    return res.status(400).send({
-        message:"Hardware not connected"
-    });
-
-}
     hardwareManager.startMonitoring();
-    if(hardwareMode==="USB"){
-
-    serialPortInstance.write("START\n");
-
-}
-if(hardwareMode==="Bluetooth"){
-
-    bluetoothSocket.write("START");
-
-}
-if(hardwareMode==="WiFi"){
-
-    await fetch("http://ESP_IP/start",{
-
-        method:"POST"
-
-    });
-
-}
     lastReadingTime = null;
 
     // Upsert session details in MongoDB Atlas
@@ -426,25 +408,7 @@ app.post("/end-session", async (req, res) => {
     );
 
     console.log(`✓ Session Ended for patient: ${currentSession.patientName}`);
-    if(hardwareMode==="USB"){
-
-    serialPortInstance.write("STOP\n");
-
-}
-if(hardwareMode==="Bluetooth"){
-
-    bluetoothSocket.write("STOP");
-
-}
-if(hardwareMode==="WiFi"){
-
-    await fetch("http://ESP_IP/stop",{
-
-        method:"POST"
-
-    });
-
-}
+    
     currentSession = null;
     hardwareManager.stopMonitoring();
     res.send({ message: "Session ended successfully" });
@@ -514,6 +478,15 @@ app.post("/set-active-mode", (req, res) => {
   } catch (err) {
     res.status(500).send({ success: false, error: err.message });
   }
+});
+
+// Get active hardware connectivity status (called by Therapy details polling)
+app.get("/hardware/status", (req, res) => {
+  const statusInfo = hardwareManager.getStatus();
+  res.json({
+    mode: simulationMode ? "Simulated" : statusInfo.mode,
+    status: simulationMode ? "Connected" : statusInfo.status
+  });
 });
 
 // Update & Save hardware config route (called by device configuration inputs)

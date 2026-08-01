@@ -27,89 +27,107 @@ function TherapyPage() {
   const [connecting, setConnecting] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [battery, setBattery] = useState(100);
-const [firmware, setFirmware] = useState("v3.2.1");
-const [sensorCount, setSensorCount] = useState(64);
+  const [firmware, setFirmware] = useState("v3.2.1");
+  const [sensorCount, setSensorCount] = useState(64);
+  const [hardwareStatus, setHardwareStatus] = useState<string>("Disconnected");
+  const [activeHardwareMode, setActiveHardwareMode] = useState<string>("Disconnected");
+  
   const selectedPoint = VARMAM_POINTS.find((p)=>p.pointName===t.point);
   const filteredPoints = VARMAM_POINTS;
-  useEffect(() => {
-    if (t.connectivity) setConnected(true);
-  }, [t.connectivity]);
 
   const valid = useMemo(() => t.point && t.technique && t.connectivity && connected, [t, connected]);
 
   useEffect(() => {
-  if (selectedPoint) {
-    update("therapy", {
-      technique: selectedPoint.techniques.join(", "),
-    });
-  }
-}, [t.point]);
-
-useEffect(() => {
-  const fetchDeviceStatus = async () => {
-    try {
-      const res = await fetch("http://localhost:5000/device-status");
-      const data = await res.json();
-
-      setBattery(data.battery);
-      setFirmware(data.firmware);
-      setSensorCount(data.sensors);
-    } catch (err) {
-      console.error("Unable to fetch device status");
+    if (selectedPoint) {
+      update("therapy", {
+        technique: selectedPoint.techniques.join(", "),
+      });
     }
+  }, [t.point]);
+
+  useEffect(() => {
+    const fetchDeviceStatus = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/device-status");
+        const data = await res.json();
+
+        setBattery(data.battery);
+        setFirmware(data.firmware);
+        setSensorCount(data.sensors);
+      } catch (err) {
+        console.error("Unable to fetch device status");
+      }
+    };
+
+    fetchDeviceStatus();
+    const interval = setInterval(fetchDeviceStatus, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const fetchHardwareStatus = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/hardware/status");
+        if (res.ok) {
+          const data = await res.json();
+          setHardwareStatus(data.status); // "Connecting", "Connected", "Disconnected", "Failed"
+          setActiveHardwareMode(data.mode); // "USB", "WiFi", "Bluetooth" or "Simulated"
+          
+          if (data.status === "Connected") {
+            setConnected(true);
+          } else {
+            setConnected(false);
+          }
+        }
+      } catch (err) {
+        console.error("Unable to fetch hardware status:", err);
+      }
+    };
+
+    fetchHardwareStatus();
+    const interval = setInterval(fetchHardwareStatus, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  const getCardStatus = (modeId: typeof MODES[number]["id"]) => {
+    if (activeHardwareMode === "Simulated" && t.connectivity === modeId) {
+      return "Connected";
+    }
+    let mappedMode = "";
+    if (modeId === "USB Cable") mappedMode = "USB";
+    else if (modeId === "WiFi") mappedMode = "WiFi";
+    else if (modeId === "Bluetooth") mappedMode = "Bluetooth";
+
+    if (activeHardwareMode === mappedMode) {
+      return hardwareStatus;
+    }
+    return "Disconnected";
   };
 
-  fetchDeviceStatus();
-
-  const interval = setInterval(fetchDeviceStatus, 1000);
-
-  return () => clearInterval(interval);
-}, []);
-
   const pickMode = async (mode: typeof MODES[number]["id"]) => {
-
     setConnecting(mode);
-
     setConnected(false);
+    update("therapy", { connectivity: mode });
 
-    update("therapy",{
-        connectivity:mode
-    });
+    try {
+      const res = await fetch("http://localhost:5000/set-active-mode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ mode })
+      });
 
-    try{
-
-        const res=await fetch("http://localhost:5000/connect-hardware",{
-
-            method:"POST",
-
-            headers:{
-                "Content-Type":"application/json"
-            },
-
-            body:JSON.stringify({
-                mode
-            })
-
-        });
-
-        const data=await res.json();
-
-        if(data.connected){
-
-            setConnected(true);
-
-        }
-
+      const data = await res.json();
+      if (!data.success) {
+        alert("Failed to switch connectivity mode");
+      }
+    } catch (err) {
+      alert("Unable to connect hardware");
+    } finally {
+      setConnecting(null);
     }
-    catch(err){
-
-        alert("Unable to connect hardware");
-
-    }
-
-    setConnecting(null);
-
-};
+  };
 
   return (
     <StepShell>
@@ -161,7 +179,8 @@ useEffect(() => {
               {MODES.map((m) => {
                 const Icon = m.icon;
                 const active = t.connectivity === m.id;
-                const isConnecting = connecting === m.id;
+                const cardStatus = getCardStatus(m.id);
+                const isConnecting = connecting === m.id || (active && cardStatus === "Connecting");
                 return (
                   <motion.button
                     key={m.id}
@@ -179,9 +198,11 @@ useEffect(() => {
                     <div className="text-xs text-muted-foreground">{m.sub}</div>
                     <div className="mt-3 flex items-center gap-1.5 text-[11px] font-medium">
                       {isConnecting ? (
-                        <><Loader2 className="h-3 w-3 animate-spin text-primary" /> <span className="text-primary">Pairing…</span></>
-                      ) : active ? (
+                        <><Loader2 className="h-3 w-3 animate-spin text-primary" /> <span className="text-primary">Connecting…</span></>
+                      ) : active && cardStatus === "Connected" ? (
                         <><CheckCircle2 className="h-3 w-3 text-success" /> <span className="text-success">Connected</span></>
+                      ) : active && cardStatus === "Failed" ? (
+                        <><span className="h-1.5 w-1.5 rounded-full bg-destructive animate-pulse" /> <span className="text-destructive font-semibold">Failed to Connect</span></>
                       ) : (
                         <><span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" /> <span className="text-muted-foreground">Idle</span></>
                       )}
