@@ -1,0 +1,32 @@
+services:
+
+  ml-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.ml
+    container_name: varmam-ml
+    ports:
+      - "5001:5001"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: varmam-backend
+    ports:
+      - "5000:5000"
+    environment:
+      ML_SERVICE_URL: http://ml-service:5001
+      DOCKER_ENV: "true"
+    depends_on:
+      - ml-service
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: varmam-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend

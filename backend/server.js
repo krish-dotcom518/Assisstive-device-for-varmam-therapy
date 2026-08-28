@@ -15,7 +15,8 @@ const { HardwareManager } = require("./hardware");
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
-
+const ML_SERVICE_URL =
+  process.env.ML_SERVICE_URL || "http://localhost:5001";
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: "*" }
@@ -90,7 +91,10 @@ hardwareManager.onSensorData(async (sensorData) => {
 });
 
 // Auto connect at startup
-hardwareManager.reconnect();
+// Auto connect at startup
+if (process.env.DOCKER_ENV !== "true") {
+  hardwareManager.reconnect();
+}
 
 
 
@@ -106,7 +110,7 @@ async function getMLPredictions(matrix, status, sessionId) {
   lastReadingTime = now;
 
   try {
-    const response = await fetch("http://localhost:5001/predict", {
+    const response = await fetch(`${ML_SERVICE_URL}/predict`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -371,7 +375,7 @@ app.post("/session-start", async (req, res) => {
     // Clear models sequence history
     try {
       const sessionId = `${currentSession.patientName}_${currentSession.sessionNumber}`;
-      await fetch(`http://localhost:5001/clear-session/${sessionId}`, { method: "POST" });
+      await fetch(`${ML_SERVICE_URL}/clear-session/${sessionId}`, { method: "POST" });
     } catch (e) {}
 
     // Auto-trigger simulation mode if configured
